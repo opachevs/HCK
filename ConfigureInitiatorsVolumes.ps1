@@ -222,11 +222,11 @@ for($j=0 ;$j -le $Vol_Num -1  ; $j++){
         $jobj = ConvertTo-Json $pobj
         $OBJ=Invoke-RestMethod -Uri $uri -Method Post -Body $jobj -Headers $headers -ContentType "application/json"
         if ($error) {Exit}
-
+    }
         #Get Volumes to extract vol_id
         $uri = $uri_prefix + "volumes"
         $OBJ=Invoke-RestMethod -Uri $uri -Method Get -Headers $headers
-
+    
         #extracting vol_id
         if($OBJ.volumes.name.count -gt 1){
             for($i = 0 ; $i -le $OBJ.volumes.name.count ; $i++){
@@ -244,6 +244,21 @@ for($j=0 ;$j -le $Vol_Num -1  ; $j++){
             $vol_id=$tmp[$tmp.Count -1]
             $vol_id=[convert]::ToInt32($vol_id,10) 
         }
+
+        #unmapping all the volumes
+        $uri = $uri_prefix + "lun-maps"
+        $OBJ=Invoke-RestMethod -Uri $uri -Method Get -Headers $headers 
+        if ($error) {Exit}
+
+        $OBJ."lun-maps".name.count
+        if($OBJ."lun-maps".name.count -gt 1){
+            for($i=0 ; $i -le $OBJ."lun-maps".href.count -1 ; $i++){
+                Invoke-RestMethod -Uri $OBJ."lun-maps".href[$i] -Method Delete -Headers $headers -ContentType "application/json"
+            }
+        }if($OBJ."lun-maps".name.count -eq 1){
+            Invoke-RestMethod -Uri $OBJ."lun-maps".href -Method Delete -Headers $headers -ContentType "application/json"
+        }
+
         #mapping the new volume
         $uri = $uri_prefix + "lun-maps"
         $pobj = [pscustomobject]@{}
@@ -253,9 +268,35 @@ for($j=0 ;$j -le $Vol_Num -1  ; $j++){
         $OBJ=Invoke-RestMethod -Uri $uri -Method Post -Body $jobj -Headers $headers -ContentType "application/json"
         if ($error) {Exit}      
         
-    }
+    
 }
 write-host "successful"
+
+#write-host 'configure MPIO policy to Fail Over Only'     
+#C:\Windows\System32\mpclaim.exe -l -t "XtremIO XtremApp        " 1
+#write-host "successful"
+
+write-host "rescan for new hardware"
+start-sleep -s 10
+"rescan" | diskpart.exe
+"rescan" | diskpart.exe
+start-sleep -s 30
+write-host "successful"
+
+#Initializing Disk
+$tmp=Get-Disk
+if($tmp.Count -eq 2){
+    if($tmp.operationalstatus[1] -ne "Online"){
+        write-host "Initializing Disk"
+        Initialize-Disk -Number $tmp.number[1] -PartitionStyle GPT -PassThru | New-Partition -AssignDriveLetter -UseMaximumSize | Format-Volume -Confirm:$false
+        if ($error) {Exit}
+        start-sleep -s 5
+        Get-Disk $tmp.number[1]
+        write-host "successful"Get-Command -Module MPIO cmdlet
+    }
+}
+
+
 
 }
 
@@ -280,7 +321,7 @@ if ($args[0] -eq 'drm'){
 
 Write-Output 'Starting .\ConfigureInitiatorsVolumes script'
 
-$Vol_Num=$args[2]
+$Vol_Num=1   ###$args[2]
 $Vol_Size=$args[3]
 
 
@@ -290,6 +331,11 @@ if($tmp -gt 254){
     $tmp=$tmp % 100
 }
 
+#﻿﻿Set-ExecutionPolicy -ExecutionPolicy Unrestricted -Scope CurrentUser
+
+#Import-Module MPIO
+
+#SetMpioLoadBalancePolicy FOO
 
 ConfigureInitiatorsVolumes
 
