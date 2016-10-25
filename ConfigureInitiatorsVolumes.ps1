@@ -114,7 +114,9 @@ $OBJ=Invoke-RestMethod -Uri $uri -Method Get -Headers $headers
 write-host 'Adding InitiatorGroup Win_iSCSI_IG'
  $uri = $uri_prefix + "initiator-groups"
 $pobj = [pscustomobject]@{}
-$init_grp="Win_iSCSI_IG"
+$hostname=Get-InitiatorPort -Connectiontype iSCSI | Select-Object -Property NodeAddress
+$hostname=$hostname.NodeAddress.Split(':')[1]
+$init_grp="Win_IG_" + $hostname
 $flag=0
 if($OBJ.'initiator-groups'.name.count -gt 1){
     for($i = 0 ; $i -le $OBJ.'initiator-groups'.name.count ; $i++){
@@ -163,10 +165,10 @@ $uri = $uri_prefix + "initiators"
 $OBJ=Invoke-RestMethod -Uri $uri -Method Get -Headers $headers
 
 #adding the initiators to the InitiatorGroup Win_iSCSI_IG
-write-host 'Adding windows Initiator Win_iSCSI_Initiator to InitiatorGroup Win_iSCSI_IG'
+write-host 'Adding windows Initiator Win_iSCSI_Initiator to InitiatorGroup Win_IG'
 $uri = $uri_prefix + "initiators"
 $pobj = [pscustomobject]@{}
-$init_name="Win_iSCSI_Initiator"
+$init_name="Initiator" + $hostname
 $InitiatorIqn=Get-InitiatorPort -Connectiontype iSCSI | Select-Object -Property NodeAddress
 $InitiatorIqn=$InitiatorIqn.NodeAddress
 $flag=0
@@ -245,18 +247,25 @@ for($j=0 ;$j -le $Vol_Num -1  ; $j++){
             $vol_id=[convert]::ToInt32($vol_id,10) 
         }
 
-        #unmapping all the volumes
+        #unmapping all the volumes from Win_IG
         $uri = $uri_prefix + "lun-maps"
         $OBJ=Invoke-RestMethod -Uri $uri -Method Get -Headers $headers 
+        $OBJ.'lun-maps'.name.split('_')
         if ($error) {Exit}
 
         $OBJ."lun-maps".name.count
         if($OBJ."lun-maps".name.count -gt 1){
             for($i=0 ; $i -le $OBJ."lun-maps".href.count -1 ; $i++){
-                Invoke-RestMethod -Uri $OBJ."lun-maps".href[$i] -Method Delete -Headers $headers -ContentType "application/json"
+                $tmp=$OBJ.'lun-maps'.name[$i].split('_')
+                if($tmp[1] -eq $ig_id){
+                        Invoke-RestMethod -Uri $OBJ."lun-maps".href[$i] -Method Delete -Headers $headers -ContentType "application/json"
+                }
             }
         }if($OBJ."lun-maps".name.count -eq 1){
-            Invoke-RestMethod -Uri $OBJ."lun-maps".href -Method Delete -Headers $headers -ContentType "application/json"
+            $tmp=$OBJ.'lun-maps'.name.split('_')
+            if($tmp[1] -eq $ig_id){
+                Invoke-RestMethod -Uri $OBJ."lun-maps".href -Method Delete -Headers $headers -ContentType "application/json"
+            }
         }
 
         #mapping the new volume
@@ -286,13 +295,15 @@ write-host "successful"
 #Initializing Disk
 $tmp=Get-Disk
 if($tmp.Count -eq 2){
-    if($tmp.operationalstatus[1] -ne "Online"){
-        write-host "Initializing Disk"
-        Initialize-Disk -Number $tmp.number[1] -PartitionStyle GPT -PassThru | New-Partition -AssignDriveLetter -UseMaximumSize | Format-Volume -Confirm:$false
-        if ($error) {Exit}
-        start-sleep -s 5
-        Get-Disk $tmp.number[1]
-        write-host "successful"Get-Command -Module MPIO cmdlet
+    for($i=0 ; $i -le $tmp.count -1 ; $i++){
+        if($tmp.operationalstatus[$i] -ne "Online"){
+          write-host "Initializing Disk"
+            Initialize-Disk -Number $tmp.number[$i] -PartitionStyle GPT -PassThru | New-Partition -AssignDriveLetter -UseMaximumSize | Format-Volume -Confirm:$false
+            if ($error) {Exit}
+            start-sleep -s 5
+            Get-Disk $tmp.number[$i]
+            write-host "successful"
+        }
     }
 }
 
@@ -333,9 +344,9 @@ if($tmp -gt 254){
 
 #﻿﻿Set-ExecutionPolicy -ExecutionPolicy Unrestricted -Scope CurrentUser
 
-#Import-Module MPIO
+Import-Module MPIO
 
-#SetMpioLoadBalancePolicy FOO
+Set-MSDSMGlobalDefaultLoadBalancePolicy FOO
 
 ConfigureInitiatorsVolumes
 
